@@ -7,26 +7,62 @@ import numpy as np
 # Constants for note names and scales
 NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 
-# Function to create a random melody based on the selected scale
-def create_random_melody_with_structure(scale, num_phrases=4, notes_per_phrase=8):
+# Chord Progressions (example)
+CHORD_PROGRESSIONS = [
+    ['C', 'C#', 'G'],
+    ['D', 'F#', 'A'],
+    ['E', 'G', 'B'],
+    ['A', 'C', 'E'],
+]
+
+# Function to get a random chord progression
+def get_random_chord_progression():
+    return random.choice(CHORD_PROGRESSIONS)
+
+# Function to get user input for BPM
+def get_user_bpm():
+    while True:
+        try:
+            bpm = int(input("Enter the desired BPM (Beats Per Minute): "))
+            if 30 <= bpm <= 240:  # Adjust the range as needed
+                return bpm
+            else:
+                print("BPM should be in the range of 30 to 240.")
+        except ValueError:
+            print("Invalid input. Please enter a valid number.")
+
+# Function to create a random melody based on the selected scale and chord progression
+def create_random_melody_with_chords(scale, chord_progression, num_phrases=4, notes_per_phrase=8):
     melody = []
     for _ in range(num_phrases):
-        phrase = [random.choice(scale) for _ in range(notes_per_phrase)]
-        melody.extend(phrase)
+        for chord_name in chord_progression:
+            chord = [note + str(4) for note in chord_name.split()]
+            phrase = [random.choice(chord) for _ in range(notes_per_phrase // len(chord))]
+            melody.extend(phrase)
     return melody
 
 # Function to generate harmony for a given melody
 def generate_harmony(melody, harmony_intervals):
     harmony = []
     for note in melody:
-        note_index = NOTE_NAMES.index(note[:-1])
-        harmony_note_index = (note_index + harmony_intervals[note_index]) % len(NOTE_NAMES)
-        harmony_note = NOTE_NAMES[harmony_note_index] + note[-1]
-        harmony.append(harmony_note)
+        if ' ' in note:
+            # Handle chord names by splitting them into individual notes
+            chord_notes = note.split()
+            for chord_note in chord_notes:
+                if chord_note in NOTE_NAMES:
+                    note_index = NOTE_NAMES.index(chord_note)
+                    harmony_note_index = (note_index + harmony_intervals[note_index]) % len(NOTE_NAMES)
+                    harmony_note = NOTE_NAMES[harmony_note_index] + chord_note[-1]
+                    harmony.append(harmony_note)
+        else:
+            # Handle single notes
+            note_index = NOTE_NAMES.index(note[:-1])
+            harmony_note_index = (note_index + harmony_intervals[note_index]) % len(NOTE_NAMES)
+            harmony_note = NOTE_NAMES[harmony_note_index] + note[-1]
+            harmony.append(harmony_note)
     return harmony
 
-# Function to evaluate the fitness of a melody and its harmony
-def evaluate_fitness(melody, harmony):
+def evaluate_fitness(melody, harmony, chord_progression):
     fitness_score = 0
 
     # 1. Melody Length: Encourage melodies of a specific length (e.g., 32 notes)
@@ -35,32 +71,46 @@ def evaluate_fitness(melody, harmony):
 
     # 2. Unique Notes: Encourage melodies with more unique notes
     unique_notes = len(set(melody))
-    fitness_score += unique_notes
+    fitness_score += unique_notes * 0.5  # Adjust the weight as needed
 
-    # 3. Melody Contour: Encourage melodies with a rising or falling contour
-    contour = [1 if melody[i] < melody[i + 1] else -1 for i in range(len(melody) - 1)]
-    contour_score = sum(contour)
-    fitness_score += contour_score
+    # 3. Chord Tones: Assign higher fitness for melody notes that are chord tones
+    chord_tones = set()
+    for chord in chord_progression:
+        chord_tones.update(chord.split())
+    chord_tone_count = sum(1 for note in melody if note.split()[-1] in chord_tones)
+    fitness_score += chord_tone_count * 2  # Adjust the weight as needed
 
-    # 4. Harmony: Encourage melodies that fit well with a chord progression
-    # You can define chord progressions and assign higher fitness to melodies that match them
-    # For simplicity, we'll just check if the melody and harmony share notes
-    common_notes = len(set(melody) & set(harmony))
-    fitness_score += common_notes
+    # 4. Voice Leading: Encourage smooth voice leading between chords
+    voice_leading_score = 0
+    for i in range(len(melody) - 1):
+        note1 = melody[i].split()[-1]
+        note2 = melody[i + 1].split()[-1]
+        if note1 in chord_tones and note2 in chord_tones:
+            index1 = chord_tones.index(note1)
+            index2 = chord_tones.index(note2)
+            voice_leading_score += abs(index2 - index1)
+    fitness_score += voice_leading_score * 0.1  # Adjust the weight as needed
 
     # 5. Rhythmic Patterns: Encourage melodies with interesting rhythmic patterns
     rhythmic_score = 0
     for i in range(1, len(melody)):
         if random.random() < 0.2:  # Rhythmic variation rate
             rhythmic_score += 1
-    fitness_score += rhythmic_score
+    fitness_score += rhythmic_score * 0.2  # Adjust the weight as needed
+
+    # 6. Melodic Contour: Encourage melodies with a balanced contour
+    contour = [1 if melody[i] < melody[i + 1] else -1 for i in range(len(melody) - 1)]
+    contour_score = sum(contour)
+    fitness_score += contour_score * 0.2  # Adjust the weight as needed
 
     return fitness_score
 
+
+
 # Function to select melodies for the next generation based on their fitness
-def select_melodies(population):
+def select_melodies(population, chord_progression):
     # Select melodies based on their fitness (higher fitness has a better chance)
-    fitness_scores = [evaluate_fitness(melody, harmony) for melody, harmony in population]
+    fitness_scores = [evaluate_fitness(melody, harmony, chord_progression) for melody, harmony in population]
     selected_indices = np.random.choice(range(len(population)), size=POPULATION_SIZE, p=fitness_scores/np.sum(fitness_scores))
     selected_melodies = [population[i] for i in selected_indices]
     return selected_melodies
@@ -142,7 +192,7 @@ if mode_choice in modes:
         modified_note_index = (i + sum(mode_intervals[:i])) % len(NOTE_NAMES)
         modified_note = NOTE_NAMES[modified_note_index] + str(i // len(NOTE_NAMES) + 4)
         modified_scale.append(modified_note)
-    
+
     print(f"Original Scale: {selected_scale}")
     print(f"Mode Applied: {mode_choice}")
     print(f"Modified Scale: {modified_scale}")
@@ -160,36 +210,60 @@ best_melody_file = 'best_melody.mid'
 POPULATION_SIZE = 10
 NUM_GENERATIONS = 20
 
+# Get user input for BPM
+desired_bpm = get_user_bpm()
+
+# Calculate the time duration for each note and rest based on the desired BPM
+milliseconds_per_beat = 60000 / desired_bpm  # Convert BPM to milliseconds per beat
+
+# Get user input for chord progression selection
+print("Available Chord Progressions:")
+for i, progression in enumerate(CHORD_PROGRESSIONS, start=1):
+    print(f"{i}. {' -> '.join(progression)}")
+
+while True:
+    try:
+        chord_choice = int(input("Select a chord progression (1 to 3): "))
+        if 1 <= chord_choice <= len(CHORD_PROGRESSIONS):
+            chord_progression = CHORD_PROGRESSIONS[chord_choice - 1]
+            break
+        else:
+            print("Invalid choice. Please select a valid chord progression.")
+    except ValueError:
+        print("Invalid input. Please enter a valid number.")
+
 # Initialize population with both melody and harmony
-population = [(create_random_melody_with_structure(selected_scale, num_phrases=4, notes_per_phrase=8), generate_harmony(create_random_melody_with_structure(selected_scale, num_phrases=4, notes_per_phrase=8), harmony_intervals)) for _ in range(POPULATION_SIZE)]
+population = [(create_random_melody_with_chords(selected_scale, chord_progression, num_phrases=4, notes_per_phrase=8),
+               generate_harmony(create_random_melody_with_chords(selected_scale, chord_progression, num_phrases=4, notes_per_phrase=8), harmony_intervals))
+              for _ in range(POPULATION_SIZE)]
 
 for generation in range(NUM_GENERATIONS):
     print(f"Generation {generation + 1}/{NUM_GENERATIONS}")
-    selected_melodies = select_melodies(population)
-    best_melody, best_harmony = max(selected_melodies, key=lambda x: evaluate_fitness(x[0], x[1]))
-    
+    selected_melodies = select_melodies(population, chord_progression)
+    best_melody, best_harmony = max(selected_melodies, key=lambda x: evaluate_fitness(x[0], x[1], chord_progression))
+
     best_melody_track = mido.MidiTrack()
     best_harmony_track = mido.MidiTrack()
-    
+
     for melody_note, harmony_note in zip(best_melody, best_harmony):
         melody_note_number = (note_to_midi_note_number(melody_note) if melody_note else 0)
         harmony_note_number = (note_to_midi_note_number(harmony_note) if harmony_note else 0)
-        
+
         if melody_note_number:
             best_melody_track.append(mido.Message('note_on', note=melody_note_number, velocity=64, time=0))
-            best_melody_track.append(mido.Message('note_off', note=melody_note_number, velocity=64, time=500))
-        
+            best_melody_track.append(mido.Message('note_off', note=melody_note_number, velocity=64, time=int(milliseconds_per_beat)))
+
         if harmony_note_number:
             best_harmony_track.append(mido.Message('note_on', note=harmony_note_number, velocity=64, time=0))
-            best_harmony_track.append(mido.Message('note_off', note=harmony_note_number, velocity=64, time=500))
-    
+            best_harmony_track.append(mido.Message('note_off', note=harmony_note_number, velocity=64, time=int(milliseconds_per_beat)))
+
     mid = mido.MidiFile()
     mid.tracks.append(best_melody_track)
     mid.tracks.append(best_harmony_track)
     mid.save(best_melody_file)
-    
-    print(f"Best melody fitness: {evaluate_fitness(best_melody, best_harmony)}")
-    
+
+    print(f"Best melody fitness: {evaluate_fitness(best_melody, best_harmony, chord_progression)}")
+
     population = create_next_generation(selected_melodies, harmony_intervals)
 
 # Play the best generated melody
